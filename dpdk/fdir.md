@@ -83,11 +83,11 @@ ntuple使能是下发的perfect-match规则|下发的signature规则
 对比完不同之后,写代码实现,并进行测试, 成功
 
 ```
-    port_conf.fdir_conf.mode = RTE_FDIR_MODE_PERFECT;
-    port_conf.fdir_conf.pballoc = RTE_FDIR_PBALLOC_64K;
-    port_conf.fdir_conf.status = RTE_FDIR_REPORT_STATUS;
-    port_conf.fdir_conf.flexbytes_offset = 0x6;
-    port_conf.fdir_conf.drop_queue = 127;
+port_conf.fdir_conf.mode = RTE_FDIR_MODE_PERFECT;
+port_conf.fdir_conf.pballoc = RTE_FDIR_PBALLOC_64K;
+port_conf.fdir_conf.status = RTE_FDIR_REPORT_STATUS;
+port_conf.fdir_conf.flexbytes_offset = 0x6;
+port_conf.fdir_conf.drop_queue = 127;
     
 void init_fdir()
 {
