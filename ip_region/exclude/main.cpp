@@ -4,14 +4,37 @@
 #include <vector>
 #include <stdlib.h>  // atoi
 #include <arpa/inet.h> // inet_addr
+#include <math.h> //pow
+
+#include <algorithm> 
+#include <functional> 
+#include <cctype>
+#include <locale>
 
 using namespace std;
 
-struct region_info
+#define OUT_OF_RANGE  1
+
+// trim from start
+static inline std::string &ltrim(std::string &s) 
 {
-    string name;
-    vector<vector<ip_range> > regions;
-};
+    s.erase(s.begin(), std::find_if(s.begin(), s.end(), std::not1(std::ptr_fun<int, int>(std::isspace))));
+    return s;
+}
+
+// trim from end
+static inline std::string &rtrim(std::string &s)
+{
+    s.erase(std::find_if(s.rbegin(), s.rend(), std::not1(std::ptr_fun<int, int>(std::isspace))).base(), s.end());
+    return s;
+}
+
+// trim from both ends
+static inline std::string &trim(std::string &s) 
+{
+    return ltrim(rtrim(s));
+}
+
 
 struct ip_range
 {
@@ -19,7 +42,16 @@ struct ip_range
     unsigned int end;
 };
 
-static inline const char* get_ip_strint(unsigned int ip)
+struct region_info
+{
+    string name;
+    vector<ip_range> regions;
+};
+
+vector<region_info> g_region;
+
+
+static inline const char* get_ip_string(unsigned int ip)
 {
     ip = htonl(ip);
     struct in_addr addr;
@@ -31,7 +63,8 @@ int exclude(ip_range big, ip_range small, vector<ip_range> &ret)
 {
     if (big.start > small.start || big.end < small.end)
     {
-        cout << "error !" << get_ip_strint(big.start) << endl;
+        // cout << "error !" << get_ip_string(big.start) << endl;
+        return OUT_OF_RANGE;
     }
 
     ip_range block[2]; // left and right
@@ -55,7 +88,7 @@ int exclude(ip_range big, ip_range small, vector<ip_range> &ret)
 
 ip_range get_ip_range(string line)
 {
-    //   61.135.184.193/26; => 
+    //   10.0.0.1/30; => 10.0.0.0 - 10.0.0.3 
     ip_range ret;
     size_t pos = line.find("/");
     int mask   = atoi(line.substr(pos + 1, line.length() - pos - 1/*;*/).c_str());
@@ -79,9 +112,9 @@ ip_range get_ip_range(string line)
     return ret;
 }
 
-vector<string> get_exclue(const char* file)
+vector<ip_range> get_exclue(const char* file)
 {
-    vector<string> ret;
+    vector<ip_range> ret;
 
     ifstream ifs(file);
     if (!ifs.is_open())
@@ -91,11 +124,11 @@ vector<string> get_exclue(const char* file)
     string line;
     while(getline(ifs, line)) 
     {
+        line = trim(line);
         size_t pos = line.find("/");
         if (pos != string::npos)
         {
-            ret.push_back(line.substr(pos, line.length()));
-            get_ip_range(line);
+            ret.push_back(get_ip_range(line));
         }
     }
 
@@ -104,7 +137,105 @@ vector<string> get_exclue(const char* file)
 
 int init_whole_region(const char* file)
 {
-    
+    ifstream ifs(file);
+    if (!ifs.is_open())
+    {
+        cout << "open file " << file << " failed" << endl;
+        return 1;
+    }
+
+    string line;
+    size_t pos;
+    const char* name_key = "region";
+
+    region_info local_region;
+
+    while(getline(ifs, line)) 
+    {
+        line = trim(line);
+        pos = line.find("//");
+        if (pos != string::npos)
+        {
+            if (pos == 0)
+            {
+                continue;
+            }
+            else
+            {
+                line = line.substr(0, pos);
+            }
+        }
+
+        pos = line.find(name_key);
+        if (pos != string::npos && pos == 0)
+        {
+            if (local_region.name != "")
+            {
+                g_region.push_back(local_region);
+            }
+            pos = line.find("{");
+            if (pos == string::npos)
+            {
+                cout << "error when parse region name" << endl;
+                exit(0);
+            }
+            string name = line.substr(strlen(name_key), pos - strlen(name_key));
+            name = trim(name);
+            local_region.name = name;
+            local_region.regions.clear();
+            continue;
+        }
+        else
+        {
+            pos = line.find("/");
+            if (pos != string::npos)
+            {
+                local_region.regions.push_back(get_ip_range(line));
+#ifdef CHECK_REGION_ERR                
+                string start_ip_str = line.substr(0, pos);
+                ip_range tmp = get_ip_range(line);
+                if (start_ip_str != get_ip_string(tmp.start))
+                {
+                    cout << local_region.name << endl;
+                    cout << line << "-" << get_ip_string(tmp.start) <<endl;
+                }
+#endif
+            }
+        }
+    }
+
+#if 0
+    for (vector<region_info>::iterator i = g_region.begin(); i != g_region.end(); ++i)
+    {
+        cout << i->name << endl;
+        for (vector<ip_range>::iterator sub_i = i->regions.begin(); sub_i != i->regions.end(); ++sub_i)
+        {
+            cout << get_ip_string(sub_i->start) << "-" << get_ip_string(sub_i->end) << endl; 
+        }
+    }
+#endif
+    return 0;
+}
+
+int ip_range_to_mask(ip_range r, vector<string> &regions)
+{
+    unsigned int start = r.start;
+    int i;
+    for (i = 0; (i < 31) && (pow(2, i + 1) < r.end - r.start); ++i)
+    {
+        if ((start >> i) & 0x1)
+        {
+            break;
+        }
+    }
+
+    r.start = start + pow(2, i);
+    cout << get_ip_string(start) << "/" << 32 - i << endl;
+    if (r.start <= r.end)
+    {
+        ip_range_to_mask(r, regions);
+    }
+
     return 0;
 }
 
@@ -117,12 +248,54 @@ void test()
     exclude(lhs, rhs, ret);
     for (vector<ip_range>::iterator i = ret.begin(); i != ret.end(); ++i)
     {
-        cout << get_ip_strint(i->start) << "-" << get_ip_strint(i->end) << endl;
-    }    
+        cout << get_ip_string(i->start) << "-" << get_ip_string(i->end) << endl;
+        vector<string> depart;
+        ip_range_to_mask(*i, depart);
+    }
+}
+
+void exclude_one_file(const char* file)
+{
+    vector<ip_range> ex_ranges = get_exclue(file);
+    for (vector<region_info>::iterator i = g_region.begin(); i != g_region.end(); ++i)
+    {
+        for (vector<ip_range>::iterator sub_i = i->regions.begin(); sub_i != i->regions.end(); ++sub_i)
+        {
+            for (vector<ip_range>::iterator ex_i = ex_ranges.begin(); ex_i != ex_ranges.end(); ++ex_i)
+            {
+                vector<ip_range> ex;
+                if (exclude(*sub_i, *ex_i, ex) == 0)
+                {
+                    cout << i->name << endl;
+                    cout << "region_new range: " << get_ip_string(sub_i->start) << "-" << get_ip_string(sub_i->end) << endl;
+                    cout << "exclude range:    " << get_ip_string(ex_i->start) << "-" << get_ip_string(ex_i->end) << endl;
+                    cout << "result :" << endl;
+                    for (vector<ip_range>::iterator ret_i = ex.begin(); ret_i != ex.end(); ++ret_i)
+                    {
+                        cout << get_ip_string(ret_i->start) << "-" << get_ip_string(ret_i->end) << " => mask format" << endl;
+                        vector<string> depart;
+                        ip_range_to_mask(*ret_i, depart);
+                    }
+                    cout << endl;
+                }
+            }
+
+        }
+    }
 }
 
 int main()
 {
-    test();
+    int ret = init_whole_region("region_new");
+    if (ret) {
+        return ret;
+    }
+
+    const char* files[] = {"1.txt", "2.txt", "3.txt", "4.txt", "5.txt"};
+    for (int i = 0; i < sizeof(files)/sizeof(files[0]); ++i)
+    {
+        exclude_one_file(files[i]);
+    }
+
     return 0;
 }
