@@ -48,6 +48,12 @@ struct region_info
     vector<ip_range> regions;
 };
 
+struct replace_info
+{
+    string old_line;
+    string new_line;
+};
+
 vector<region_info> g_region;
 
 
@@ -144,6 +150,8 @@ int init_whole_region(const char* file)
         return 1;
     }
 
+    g_region.clear();
+
     string line;
     size_t pos;
     const char* name_key = "region";
@@ -221,7 +229,7 @@ int ip_range_to_mask(ip_range r, vector<string> &regions)
 {
     unsigned int start = r.start;
     int i;
-    for (i = 0; (i < 31) && (pow(2, i + 1) < r.end - r.start); ++i)
+    for (i = 0; (i < 31) && (pow(2, i + 1) <= (r.end - r.start + 1)); ++i)
     {
         if ((start >> i) & 0x1)
         {
@@ -230,7 +238,10 @@ int ip_range_to_mask(ip_range r, vector<string> &regions)
     }
 
     r.start = start + pow(2, i);
-    cout << get_ip_string(start) << "/" << 32 - i << endl;
+    string one = get_ip_string(start);
+    one += "/" + std::to_string(32 - i);
+    regions.push_back(one);
+
     if (r.start <= r.end)
     {
         ip_range_to_mask(r, regions);
@@ -254,8 +265,16 @@ void test()
     }
 }
 
+void save_to_file(const char* file)
+{
+    ofstream ofs(file);
+    
+}
+
 void exclude_one_file(const char* file)
 {
+    const char* end = ";";
+    vector<replace_info> replace;
     vector<ip_range> ex_ranges = get_exclue(file);
     for (vector<region_info>::iterator i = g_region.begin(); i != g_region.end(); ++i)
     {
@@ -266,17 +285,26 @@ void exclude_one_file(const char* file)
                 vector<ip_range> ex;
                 if (exclude(*sub_i, *ex_i, ex) == 0)
                 {
-                    cout << i->name << endl;
-                    cout << "region_new range: " << get_ip_string(sub_i->start) << "-" << get_ip_string(sub_i->end) << endl;
-                    cout << "exclude range:    " << get_ip_string(ex_i->start) << "-" << get_ip_string(ex_i->end) << endl;
-                    cout << "result :" << endl;
+                    vector<string> old;
+                    ip_range_to_mask(*sub_i, old);
+                    if (old.size() != 1)
+                    {
+                        cout << "error when rollback region_new line" << endl;
+                        exit(0);
+                    }
+                    replace_info  rep;
+                    rep.old_line = old[0] + end;
                     for (vector<ip_range>::iterator ret_i = ex.begin(); ret_i != ex.end(); ++ret_i)
                     {
-                        cout << get_ip_string(ret_i->start) << "-" << get_ip_string(ret_i->end) << " => mask format" << endl;
                         vector<string> depart;
                         ip_range_to_mask(*ret_i, depart);
+                        for (vector<string>::iterator new_i = depart.begin(); new_i != depart.end(); ++new_i)
+                        {
+                            rep.new_line += *new_i + end + "\n";
+                        }
                     }
-                    cout << endl;
+
+                    cout << rep.old_line << "=>"<<endl << rep.new_line << endl;
                 }
             }
 
