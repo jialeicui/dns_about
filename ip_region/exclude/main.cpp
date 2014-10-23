@@ -42,10 +42,17 @@ struct ip_range
     unsigned int end;
 };
 
+struct region_line
+{
+    string org_line;
+    vector<ip_range> ranges;
+};
+
 struct region_info
 {
     string name;
-    vector<ip_range> regions;
+    bool change;
+    vector<region_line> regions;
 };
 
 struct replace_info
@@ -175,7 +182,7 @@ int init_whole_region(const char* file)
         }
 
         pos = line.find(name_key);
-        if (pos != string::npos && pos == 0)
+        if (pos != string::npos && pos == 0 && line.substr(line.length() - 1, 1) == "{")
         {
             if (local_region.name != "")
             {
@@ -190,6 +197,7 @@ int init_whole_region(const char* file)
             string name = line.substr(strlen(name_key), pos - strlen(name_key));
             name = trim(name);
             local_region.name = name;
+            local_region.change = false;
             local_region.regions.clear();
             continue;
         }
@@ -198,7 +206,11 @@ int init_whole_region(const char* file)
             pos = line.find("/");
             if (pos != string::npos)
             {
-                local_region.regions.push_back(get_ip_range(line));
+                region_line rl;
+                rl.org_line = line;
+                rl.ranges.push_back(get_ip_range(line));
+                local_region.regions.push_back(rl);
+
 #ifdef CHECK_REGION_ERR                
                 string start_ip_str = line.substr(0, pos);
                 ip_range tmp = get_ip_range(line);
@@ -271,43 +283,48 @@ void save_to_file(const char* file)
     
 }
 
+bool exclude_range_from_whole_region(ip_range r, vector<region_info>& region)
+{
+    for (vector<region_info>::iterator iter = region.begin(); iter != region.end(); ++iter)
+    {
+        for (vector<region_line>::iterator line_i = iter->regions.begin(); line_i != iter->regions.end(); ++line_i)
+        {
+            for (vector<ip_range>::iterator range_iter = line_i->ranges.begin(); range_iter != line_i->ranges.end(); ++range_iter)
+            {
+                vector<ip_range> ex_ret;
+                if (!exclude(*range_iter, r, ex_ret))
+                {
+                    iter->change = true;
+                    line_i->ranges.erase(range_iter);
+                    line_i->ranges.assign(ex_ret.begin(), ex_ret.end());
+                    return true;
+                }
+            }
+        }
+    }
+
+    return false;
+}
+
 void exclude_one_file(const char* file)
 {
     const char* end = ";";
     vector<replace_info> replace;
     vector<ip_range> ex_ranges = get_exclue(file);
-    for (vector<region_info>::iterator i = g_region.begin(); i != g_region.end(); ++i)
+
+    for (vector<ip_range>::iterator ex_iter = ex_ranges.begin(); ex_iter != ex_ranges.end(); ++ex_iter)
     {
-        for (vector<ip_range>::iterator sub_i = i->regions.begin(); sub_i != i->regions.end(); ++sub_i)
+        exclude_range_from_whole_region(*ex_iter, g_region);
+    }
+}
+
+void print_result()
+{
+    for (vector<region_info>::iterator iter = g_region.begin(); iter != g_region.end(); ++iter)
+    {
+        if (iter->change)
         {
-            for (vector<ip_range>::iterator ex_i = ex_ranges.begin(); ex_i != ex_ranges.end(); ++ex_i)
-            {
-                vector<ip_range> ex;
-                if (exclude(*sub_i, *ex_i, ex) == 0)
-                {
-                    vector<string> old;
-                    ip_range_to_mask(*sub_i, old);
-                    if (old.size() != 1)
-                    {
-                        cout << "error when rollback region_new line" << endl;
-                        exit(0);
-                    }
-                    replace_info  rep;
-                    rep.old_line = old[0] + end;
-                    for (vector<ip_range>::iterator ret_i = ex.begin(); ret_i != ex.end(); ++ret_i)
-                    {
-                        vector<string> depart;
-                        ip_range_to_mask(*ret_i, depart);
-                        for (vector<string>::iterator new_i = depart.begin(); new_i != depart.end(); ++new_i)
-                        {
-                            rep.new_line += *new_i + end + "\n";
-                        }
-                    }
-
-                    cout << rep.old_line << "=>"<<endl << rep.new_line << endl;
-                }
-            }
-
+            cout << iter->name<< endl;
         }
     }
 }
@@ -324,6 +341,6 @@ int main()
     {
         exclude_one_file(files[i]);
     }
-
+    print_result();
     return 0;
 }
