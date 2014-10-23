@@ -45,6 +45,7 @@ struct ip_range
 struct region_line
 {
     string org_line;
+    bool change;
     vector<ip_range> ranges;
 };
 
@@ -208,6 +209,7 @@ int init_whole_region(const char* file)
             {
                 region_line rl;
                 rl.org_line = line;
+                rl.change = false;
                 rl.ranges.push_back(get_ip_range(line));
                 local_region.regions.push_back(rl);
 
@@ -295,6 +297,7 @@ bool exclude_range_from_whole_region(ip_range r, vector<region_info>& region)
                 if (!exclude(*range_iter, r, ex_ret))
                 {
                     iter->change = true;
+                    line_i->change = true;
                     line_i->ranges.erase(range_iter);
                     line_i->ranges.assign(ex_ret.begin(), ex_ret.end());
                     return true;
@@ -318,29 +321,120 @@ void exclude_one_file(const char* file)
     }
 }
 
-void print_result()
+void get_change_region(vector<region_info> &ret)
 {
+    ret.clear();
     for (vector<region_info>::iterator iter = g_region.begin(); iter != g_region.end(); ++iter)
     {
         if (iter->change)
         {
-            cout << iter->name<< endl;
+            ret.push_back(*iter);
         }
     }
 }
 
+void check_all_change(vector<region_info> &change_region)
+{
+    for (vector<region_info>::iterator iter = change_region.begin(); iter != change_region.end(); ++iter)
+    {
+        for (vector<region_line>::iterator line_i = iter->regions.begin(); line_i != iter->regions.end(); ++line_i)
+        {
+            if (line_i->change)
+            {
+                cout << iter->name;
+            }
+        }
+    }
+}
+
+void print_result()
+{
+    vector<region_info> change_region;
+    get_change_region(change_region);
+    ifstream ifs("region_new");
+    ofstream ofs("region_proc");
+
+    string line;
+    while(getline(ifs, line)) {
+        bool replace = false;
+        for (vector<region_info>::iterator iter = change_region.begin(); iter != change_region.end(); ++iter)
+        {
+            for (vector<region_line>::iterator line_i = iter->regions.begin(); line_i != iter->regions.end(); ++line_i)
+            {
+                // cout << line_i->org_line << endl;
+                if (line_i->change && (line == line_i->org_line))
+                {
+                    for (vector<ip_range>::iterator range_i = line_i->ranges.begin(); range_i != line_i->ranges.end(); ++range_i)
+                    {
+                        vector<string> mask_ips;
+                        ip_range_to_mask(*range_i, mask_ips);
+                        for (vector<string>::iterator str_i = mask_ips.begin(); str_i != mask_ips.end(); ++str_i)
+                        {
+                            ofs << *str_i << ";" << endl;
+                        }
+                    }
+                    line_i->change = false;
+                    replace = true;
+                }
+            }
+        }
+
+        if (!replace)
+        {
+            ofs << line << endl;
+        }
+    }
+
+    // check_all_change(change_region);
+}
+
+void create_region_file(ofstream &ofs, const char* file)
+{
+    ifstream ifs(file);
+    string line;
+    bool start = true;
+    while(getline(ifs, line)) 
+    {
+        line = trim(line);
+        size_t pos = line.find("/");
+        if (pos != string::npos)
+        {
+            ofs << line << endl;
+        }
+        else if (line.length() != 0)
+        {
+            if (!start)
+            {
+                ofs << "};" << endl << endl;
+            }
+
+            //region名
+            ofs << "region " << line << " {" << endl;
+            start = false;
+        }
+    }
+    ofs << "};" << endl << endl;
+}
+
 int main()
 {
+    const char* files[] = {"1.txt", "2.txt", "3.txt", "4.txt", "5.txt"};
+#if 0    
     int ret = init_whole_region("region_new");
     if (ret) {
         return ret;
     }
 
-    const char* files[] = {"1.txt", "2.txt", "3.txt", "4.txt", "5.txt"};
     for (int i = 0; i < sizeof(files)/sizeof(files[0]); ++i)
     {
         exclude_one_file(files[i]);
     }
     print_result();
+#endif
+    ofstream ofs("jifang_regions.txt");
+    for (int i = 0; i < sizeof(files)/sizeof(files[0]); ++i)
+    {
+        create_region_file(ofs, files[i]);
+    }
     return 0;
 }
